@@ -63,6 +63,37 @@ let landedPlatform = currentPlatform;
 
 let leftPlatform = null;
 let rightPlatform = null;
+const PLATFORM_GAP = 150;
+let platformRows = [];
+let upcomingRows = [];
+let nextPlatformStep = 1;
+
+function fillPlatformsAbove(){
+    let topY = platformRows.length
+        ? platformRows[platformRows.length - 1][0].y
+        : currentPlatform.y;
+    const centerX = canvas.width / 2;
+    const spacing = Math.min(170, Math.max(60, (canvas.width - 140) / 2));
+
+    // Keep a visible route ahead plus a spare row entering from the top.
+    while(topY > -PLATFORM_GAP || upcomingRows.length < 3){
+        const question = generateQuestion();
+        if(!question) break;
+        topY -= PLATFORM_GAP;
+        const row = [-1, 1].map(side => ({
+            x: centerX + side * spacing - 60,
+            y: topY,
+            w: 120,
+            h: 20,
+            answer: (side === -1) === question.leftCorrect
+                ? question.correct : question.wrong,
+            correct: (side === -1) === question.leftCorrect
+        }));
+        row.question = question;
+        platformRows.push(row);
+        upcomingRows.push(row);
+    }
+}
 
 let particles = [];
 
@@ -75,10 +106,11 @@ function updateHUD() {
     levelEl.textContent = `${level} (×${level} table)`;
 }
 
-function createQuestion() {
+function generateQuestion() {
     const table = level;
 
-    let questionStep = step;
+    let questionStep = nextPlatformStep++;
+    let card = null;
 
     if(gameMode === "training"){
         if(trainingQueue.length === 0){
@@ -89,14 +121,12 @@ function createQuestion() {
             }
         }
 
-        trainingQuestion = trainingQueue.shift();
-        questionStep = trainingQuestion.step;
+        card = trainingQueue.shift();
+        questionStep = card.step;
     } else if(gameMode === "test"){
         if(testQueue.length === 0){
             if(testRangeStart > 20){
-                testComplete = true;
-                endGame();
-                return;
+                return null;
             }
 
             testQueue = Array.from(
@@ -130,35 +160,20 @@ function createQuestion() {
     const leftCorrect =
         Math.random() < 0.5;
 
-    const centerX = canvas.width / 2;
-    const platformSpacing = Math.min(170, (canvas.width - 140) / 2);
+    return { table, questionStep, card, correct, wrong, leftCorrect };
+}
 
-    const centerY =
-        canvas.height / 2 - 100;
-
-    leftPlatform = {
-        x: centerX - platformSpacing - 60,
-        y: centerY,
-        w: 120,
-        h: 20,
-        answer:
-            leftCorrect
-            ? correct
-            : wrong,
-        correct: leftCorrect
-    };
-
-    rightPlatform = {
-        x: centerX + platformSpacing - 60,
-        y: centerY,
-        w: 120,
-        h: 20,
-        answer:
-            leftCorrect
-            ? wrong
-            : correct,
-        correct: !leftCorrect
-    };
+function createQuestion(){
+    fillPlatformsAbove();
+    const row = upcomingRows.shift();
+    if(!row){
+        testComplete = gameMode === "test";
+        endGame();
+        return;
+    }
+    [leftPlatform, rightPlatform] = row;
+    const { table, questionStep, card } = row.question;
+    trainingQuestion = card;
 
     questionEl.textContent =
         `${table} × ${questionStep} = ?`;
@@ -210,6 +225,10 @@ function drawParticles(){
         );
 }
 
+function answerCoinRadius(p){
+    return Math.max(26, String(p.answer).length * 6 + 10);
+}
+
 function drawPlatform(p,color){
 
     if(!p) return;
@@ -225,22 +244,30 @@ function drawPlatform(p,color){
 
     if(p.answer !== undefined && landedPlatform !== p){
         ctx.font = "bold 20px Arial";
-        const labelWidth = Math.max(64, ctx.measureText(String(p.answer)).width + 20);
-        const labelHeight = 18;
-        const labelX = p.x + (p.w - labelWidth) / 2;
-        const labelY = p.y + (p.h - labelHeight) / 2;
+        const radius = answerCoinRadius(p);
+        const coinX = p.x + p.w / 2;
+        const coinY = p.y - radius;
 
-        ctx.fillStyle = "rgba(20, 35, 55, 0.88)";
+        ctx.save();
+        ctx.fillStyle = "#ffcf40";
+        ctx.strokeStyle = "#b97808";
+        ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 8);
+        ctx.arc(coinX, coinY, radius - 1.5, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
 
-        ctx.fillStyle = "white";
+        ctx.strokeStyle = "#ffe995";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(coinX, coinY, radius - 6, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = "#613b06";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(p.answer, p.x + p.w / 2, labelY + labelHeight / 2);
-        ctx.textAlign = "left";
-        ctx.textBaseline = "alphabetic";
+        ctx.fillText(p.answer, coinX, coinY);
+        ctx.restore();
     }
 }
 
@@ -289,6 +316,14 @@ function choose(platform){
 
     if(!gameRunning || !platform) return;
     if(cat.moving) return;
+    const row = platformRows.find(row => row.includes(platform));
+    if(!row || row[0].y >= landedPlatform.y) return;
+    // Every row owns its question, so higher coins can be selected directly.
+    [leftPlatform, rightPlatform] = row;
+    trainingQuestion = row.question.card;
+    questionEl.textContent =
+        `${row.question.table} × ${row.question.questionStep} = ?`;
+    upcomingRows = upcomingRows.filter(nextRow => nextRow[0].y < row[0].y);
 
     const answeredCorrectly = platform.correct;
 
@@ -441,11 +476,12 @@ canvas.addEventListener("pointerup", e=>{
     const bounds = canvas.getBoundingClientRect();
     const x = (e.clientX - bounds.left) * canvas.width / bounds.width;
     const y = (e.clientY - bounds.top) * canvas.height / bounds.height;
-    const platform = [leftPlatform, rightPlatform].find(p =>
-        p && x >= p.x && x <= p.x + p.w &&
-        // Give the thin platform a finger-friendly target of at least 44px.
-        y >= p.y - 12 && y <= p.y + p.h + 12
-    );
+    const platform = platformRows.flat().find(p => {
+        if(p.y >= landedPlatform.y || p.answer === undefined) return false;
+        const radius = answerCoinRadius(p);
+        // Hit only the round coin, leaving the platform itself untappable.
+        return Math.hypot(x - (p.x + p.w / 2), y - (p.y - radius)) <= radius;
+    });
     if(platform) choose(platform);
 });
 
@@ -460,8 +496,8 @@ function update(){
     // once so it does not move twice after the cat chooses it.
     const sinkingPlatforms = new Set([
         currentPlatform,
-        leftPlatform,
-        rightPlatform
+        landedPlatform,
+        ...platformRows.flat()
     ]);
 
     sinkingPlatforms.forEach(platform => {
@@ -511,6 +547,23 @@ function update(){
         sinkSpeed;
     }
 
+    // Follow upward progress while keeping sinking visible when waiting.
+    const followY = canvas.height - 120 - cat.radius;
+    if(cat.y < followY){
+        const scroll = followY - cat.y;
+        sinkingPlatforms.forEach(platform => {
+            if(platform) platform.y += scroll;
+        });
+        cat.y += scroll;
+        particles.forEach(particle => { particle.y += scroll; });
+    }
+
+    platformRows = platformRows.filter(row =>
+        row[0].y <= canvas.height + 50 ||
+        row.includes(currentPlatform) || upcomingRows.includes(row)
+    );
+    fillPlatformsAbove();
+
     if(cat.y >
        canvas.height + 50){
 
@@ -543,20 +596,18 @@ function draw(){
 
     drawBackground();
 
-    drawPlatform(
-        currentPlatform,
-        "#8B5A2B"
-    );
-
-    drawPlatform(
-        leftPlatform,
-        "#3498db"
-    );
-
-    drawPlatform(
-        rightPlatform,
-        "#9b59b6"
-    );
+    // Only the starting platform is brown. Landing preserves each row's style.
+    if(!platformRows.some(row => row.includes(landedPlatform))){
+        drawPlatform(landedPlatform, "#8B5A2B");
+    }
+    platformRows.forEach(row => {
+        row.forEach((platform, index) => {
+            const active = platform === landedPlatform || platform.y < landedPlatform.y;
+            ctx.globalAlpha = active ? 1 : 0.55;
+            drawPlatform(platform, index === 0 ? "#3498db" : "#9b59b6");
+        });
+    });
+    ctx.globalAlpha = 1;
 
     drawCat();
 
