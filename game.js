@@ -22,6 +22,8 @@ const restartBtn = document.getElementById("restartBtn");
 const gameModeSelect = document.getElementById("gameMode");
 const sinkSpeedSelect = document.getElementById("sinkSpeed");
 const tableLevelSelect = document.getElementById("tableLevel");
+const deviceModeSelect = document.getElementById("deviceMode");
+let deviceMode = "";
 
 let gameRunning = false;
 
@@ -398,6 +400,14 @@ function endGame(){
 }
 
 startBtn.onclick = ()=>{
+    if(!deviceModeSelect.value){
+        deviceModeSelect.focus();
+        deviceModeSelect.reportValidity();
+        return;
+    }
+    deviceMode = deviceModeSelect.value;
+    document.getElementById("mobileControls").style.display =
+        deviceMode === "mobile" ? "none" : "flex";
 
     gameMode = gameModeSelect.value;
     level = Number(tableLevelSelect.value);
@@ -443,6 +453,7 @@ choose(rightPlatform);
 document.addEventListener(
     "keydown",
     e=>{
+        if(deviceMode === "mobile") return;
 
         if(e.key==="ArrowLeft")
             choose(leftPlatform);
@@ -467,7 +478,7 @@ canvas.addEventListener("pointerup", e=>{
     pointerStart = null;
 
     // Keep the existing swipe controls alongside direct platform taps.
-    if(Math.abs(dx) > 40){
+    if(deviceMode !== "mobile" && Math.abs(dx) > 40){
         choose(dx < 0 ? leftPlatform : rightPlatform);
         return;
     }
@@ -547,16 +558,7 @@ function update(){
         sinkSpeed;
     }
 
-    // Follow upward progress while keeping sinking visible when waiting.
-    const followY = canvas.height - 120 - cat.radius;
-    if(cat.y < followY){
-        const scroll = followY - cat.y;
-        sinkingPlatforms.forEach(platform => {
-            if(platform) platform.y += scroll;
-        });
-        cat.y += scroll;
-        particles.forEach(particle => { particle.y += scroll; });
-    }
+    // Keep the view fixed: jumping must not add camera movement to sinking.
 
     platformRows = platformRows.filter(row =>
         row[0].y <= canvas.height + 50 ||
