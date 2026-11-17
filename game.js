@@ -287,7 +287,7 @@ function drawCat(){
 
 function choose(platform){
 
-    if(!gameRunning) return;
+    if(!gameRunning || !platform) return;
     if(cat.moving) return;
 
     const answeredCorrectly = platform.correct;
@@ -417,37 +417,40 @@ document.addEventListener(
     }
 );
 
-let touchStartX = 0;
+let pointerStart = null;
 
-canvas.addEventListener(
-    "touchstart",
-    e=>{
+canvas.addEventListener("pointerdown", e=>{
+    if(!e.isPrimary || e.button !== 0 || !gameRunning || cat.moving) return;
+    pointerStart = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    canvas.setPointerCapture(e.pointerId);
+});
 
-        touchStartX =
-        e.touches[0].clientX;
+canvas.addEventListener("pointerup", e=>{
+    if(!pointerStart || pointerStart.id !== e.pointerId) return;
+    const dx = e.clientX - pointerStart.x;
+    const dy = e.clientY - pointerStart.y;
+    pointerStart = null;
+
+    // Keep the existing swipe controls alongside direct platform taps.
+    if(Math.abs(dx) > 40){
+        choose(dx < 0 ? leftPlatform : rightPlatform);
+        return;
     }
-);
+    if(Math.hypot(dx, dy) > 12) return;
 
-canvas.addEventListener(
-    "touchend",
-    e=>{
+    const bounds = canvas.getBoundingClientRect();
+    const x = (e.clientX - bounds.left) * canvas.width / bounds.width;
+    const y = (e.clientY - bounds.top) * canvas.height / bounds.height;
+    const platform = [leftPlatform, rightPlatform].find(p =>
+        p && x >= p.x && x <= p.x + p.w &&
+        // Give the thin platform a finger-friendly target of at least 44px.
+        y >= p.y - 12 && y <= p.y + p.h + 12
+    );
+    if(platform) choose(platform);
+});
 
-        const diff =
-        e.changedTouches[0]
-        .clientX -
-        touchStartX;
-
-        if(diff < -40){
-
-            choose(leftPlatform);
-        }
-
-        if(diff > 40){
-
-            choose(rightPlatform);
-        }
-    }
-);
+canvas.addEventListener("pointercancel", ()=>{ pointerStart = null; });
+canvas.addEventListener("lostpointercapture", ()=>{ pointerStart = null; });
 
 function update(){
 
