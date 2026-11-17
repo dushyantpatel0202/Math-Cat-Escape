@@ -159,6 +159,11 @@ select{
     background:#23913d;
 }
 
+#startBtn:disabled{
+    opacity:0.5;
+    cursor:not-allowed;
+}
+
 /* GAME OVER */
 
 #gameOverScreen{
