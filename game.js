@@ -10,6 +10,7 @@ const gameOverScreen = document.getElementById("gameOverScreen");
 
 const scoreEl = document.getElementById("score");
 const coinsEl = document.getElementById("coins");
+const livesDisplay = document.getElementById("livesDisplay");
 const livesEl = document.getElementById("lives");
 const highScoreEl = document.getElementById("highScore");
 const levelEl = document.getElementById("level");
@@ -21,11 +22,16 @@ const startBtn = document.getElementById("startBtn");
 const restartBtn = document.getElementById("restartBtn");
 const gameModeSelect = document.getElementById("gameMode");
 const sinkSpeedSelect = document.getElementById("sinkSpeed");
+const speedControl = document.getElementById("speedControl");
+const pauseBtn = document.getElementById("pauseBtn");
+const homeBtn = document.getElementById("homeBtn");
+const speedLevelEl = document.getElementById("speedLevel");
 const tableLevelSelect = document.getElementById("tableLevel");
 const deviceModeSelect = document.getElementById("deviceMode");
 let deviceMode = "";
 
 let gameRunning = false;
+let pausedAt = null;
 
 let score = 0;
 let coins = 0;
@@ -33,10 +39,13 @@ let lives = 3;
 let step = 1;
 let level = 1;
 let gameMode = "original";
-let sinkSpeed = 0.7;
+const SINK_SPEEDS = { slow: 0.35, normal: 0.7, fast: 1.1 };
+let sinkSpeedMode = "normal";
+let speedLevel = 1;
 let trainingEnd = 0;
 let trainingQueue = [];
 let trainingQuestion = null;
+let questionShownAt = 0;
 let testQueue = [];
 let testRangeStart = 1;
 let testComplete = false;
@@ -103,6 +112,7 @@ function updateHUD() {
 
     scoreEl.textContent = score;
     coinsEl.textContent = coins;
+    livesDisplay.hidden = gameMode === "training";
     livesEl.textContent = "❤️".repeat(lives);
     highScoreEl.textContent = highScore;
     levelEl.textContent = `${level} (×${level} table)`;
@@ -176,6 +186,7 @@ function createQuestion(){
     [leftPlatform, rightPlatform] = row;
     const { table, questionStep, card } = row.question;
     trainingQuestion = card;
+    questionShownAt = performance.now();
 
     questionEl.textContent =
         `${table} × ${questionStep} = ?`;
@@ -206,9 +217,11 @@ function drawParticles(){
 
     particles.forEach(p=>{
 
-        p.x += p.vx;
-        p.y += p.vy;
-        p.life--;
+        if(pausedAt === null){
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life--;
+        }
 
         ctx.fillStyle =
         "gold";
@@ -231,9 +244,31 @@ function answerCoinRadius(p){
     return Math.max(26, String(p.answer).length * 6 + 10);
 }
 
+function distanceToBottom(){
+    return canvas.height - landedPlatform.h - landedPlatform.y;
+}
+
+function getSinkSpeed(){
+    if(sinkSpeedMode !== "normal") return SINK_SPEEDS[sinkSpeedMode];
+
+    const screenThird = canvas.height / 3;
+    if(cat.y < screenThird) return SINK_SPEEDS.fast;
+    if(cat.y >= 2 * screenThird) return SINK_SPEEDS.slow;
+    return SINK_SPEEDS.normal;
+}
+
+speedControl.addEventListener("change", event => {
+    speedLevel = Number(event.target.value);
+    speedLevelEl.textContent = speedLevel;
+    const summary = speedControl.querySelector("summary");
+    summary.setAttribute("aria-label", `Sinking speed, level ${speedLevel}`);
+    speedControl.open = false;
+    summary.focus();
+});
+
 function drawPlatform(p,color){
 
-    if(!p) return;
+    if(!p || p.hidden) return;
 
     ctx.fillStyle = color;
 
@@ -249,23 +284,27 @@ function drawPlatform(p,color){
         const radius = answerCoinRadius(p);
         const coinX = p.x + p.w / 2;
         const coinY = p.y - radius;
+        const greenCoin = gameMode === "training" && !cat.moving && p.correct &&
+            (p === leftPlatform || p === rightPlatform) &&
+            (distanceToBottom() <= 0 ||
+                (pausedAt ?? performance.now()) - questionShownAt >= 4000);
 
         ctx.save();
-        ctx.fillStyle = "#ffcf40";
-        ctx.strokeStyle = "#b97808";
+        ctx.fillStyle = greenCoin ? "#77db79" : "#ffcf40";
+        ctx.strokeStyle = greenCoin ? "#257a37" : "#b97808";
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(coinX, coinY, radius - 1.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
 
-        ctx.strokeStyle = "#ffe995";
+        ctx.strokeStyle = greenCoin ? "#c1f5b6" : "#ffe995";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(coinX, coinY, radius - 6, 0, Math.PI * 2);
         ctx.stroke();
 
-        ctx.fillStyle = "#613b06";
+        ctx.fillStyle = greenCoin ? "#164524" : "#613b06";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(p.answer, coinX, coinY);
@@ -316,7 +355,7 @@ function drawCat(){
 
 function choose(platform){
 
-    if(!gameRunning || !platform) return;
+    if(!gameRunning || pausedAt !== null || !platform) return;
     if(cat.moving) return;
     const row = platformRows.find(row => row.includes(platform));
     if(!row || row[0].y >= landedPlatform.y) return;
@@ -333,8 +372,6 @@ function choose(platform){
         const card = trainingQuestion;
         if(answeredCorrectly){
             card.successes++;
-        } else {
-            lives--;
         }
 
         if(card.successes < 5){
@@ -343,12 +380,6 @@ function choose(platform){
             // answer before this fact returns. This also avoids due-time ties.
             const insertionIndex = Math.min(repeatGap, trainingQueue.length);
             trainingQueue.splice(insertionIndex, 0, card);
-        }
-
-        if(lives <= 0){
-            updateHUD();
-            endGame();
-            return;
         }
     } else if(!answeredCorrectly){
         lives--;
@@ -382,6 +413,13 @@ function choose(platform){
     cat.targetX = platform.x + platform.w / 2;
     cat.targetY = platform.y - cat.radius;
     cat.moving = true;
+    landedPlatform.hidden = true;
+    for(const platformRow of platformRows){
+        if(platformRow[0].y < platform.y) continue;
+        for(const otherPlatform of platformRow){
+            if(otherPlatform !== platform) otherPlatform.hidden = true;
+        }
+    }
     currentPlatform = platform;
 
     updateHUD();
@@ -411,7 +449,7 @@ startBtn.onclick = ()=>{
 
     gameMode = gameModeSelect.value;
     level = Number(tableLevelSelect.value);
-    sinkSpeed = Number(sinkSpeedSelect.value);
+    sinkSpeedMode = sinkSpeedSelect.value;
     step = 1;
     updateHUD();
     if(gameMode === "training"){
@@ -436,7 +474,7 @@ startBtn.onclick = ()=>{
     createQuestion();
 };
 
-restartBtn.onclick = ()=>{
+homeBtn.onclick = restartBtn.onclick = ()=>{
     location.reload();
 };
 
@@ -465,8 +503,24 @@ document.addEventListener(
 
 let pointerStart = null;
 
+pauseBtn.onclick = ()=>{
+    if(!gameRunning) return;
+    const now = performance.now();
+
+    if(pausedAt === null){
+        pausedAt = now;
+        pointerStart = null;
+        speedControl.open = false;
+        pauseBtn.textContent = "Resume";
+    } else {
+        questionShownAt += now - pausedAt;
+        pausedAt = null;
+        pauseBtn.textContent = "Pause";
+    }
+};
+
 canvas.addEventListener("pointerdown", e=>{
-    if(!e.isPrimary || e.button !== 0 || !gameRunning || cat.moving) return;
+    if(!e.isPrimary || e.button !== 0 || !gameRunning || pausedAt !== null || cat.moving) return;
     pointerStart = { id: e.pointerId, x: e.clientX, y: e.clientY };
     canvas.setPointerCapture(e.pointerId);
 });
@@ -501,7 +555,12 @@ canvas.addEventListener("lostpointercapture", ()=>{ pointerStart = null; });
 
 function update(){
 
-    if(!gameRunning) return;
+    if(!gameRunning || pausedAt !== null) return;
+
+    const sinkSpeed = getSinkSpeed() + (speedLevel - 1) * 0.5;
+    const sinkDistance = gameMode === "training"
+        ? Math.min(sinkSpeed, distanceToBottom())
+        : sinkSpeed;
 
     // The chosen platform is also currentPlatform. Sink each platform only
     // once so it does not move twice after the cat chooses it.
@@ -513,7 +572,7 @@ function update(){
 
     sinkingPlatforms.forEach(platform => {
         if(platform)
-            platform.y += sinkSpeed;
+            platform.y += sinkDistance;
     });
 
     if(cat.moving){
@@ -555,7 +614,7 @@ function update(){
     } else {
 
         cat.y +=
-        sinkSpeed;
+        sinkDistance;
     }
 
     // Keep the view fixed: jumping must not add camera movement to sinking.
@@ -566,7 +625,7 @@ function update(){
     );
     fillPlatformsAbove();
 
-    if(cat.y >
+    if(gameMode !== "training" && cat.y >
        canvas.height + 50){
 
         endGame();

@@ -32,7 +32,7 @@ select{
     position:absolute;
     top:10px;
     left:10px;
-    z-index:100;
+    z-index:101;
     background:rgba(255,255,255,0.85);
     padding:12px;
     border-radius:12px;
@@ -42,6 +42,54 @@ select{
 
 #hud div{
     margin:6px 0;
+}
+
+#gameControls{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:6px;
+}
+
+#speedControl{
+    position:relative;
+    justify-self:end;
+    width:max-content;
+}
+
+#speedControl summary,
+#homeBtn,
+#pauseBtn{
+    list-style:none;
+    padding:4px 8px;
+    border:0;
+    border-radius:6px;
+    background:#fff;
+    color:inherit;
+    font:inherit;
+    cursor:pointer;
+}
+
+#speedControl summary::-webkit-details-marker{
+    display:none;
+}
+
+#speedControl fieldset{
+    position:absolute;
+    left:0;
+    min-width:120px;
+    padding:4px 8px 8px;
+    border:1px solid #a8c3d1;
+    border-radius:8px;
+    background:#fff;
+    box-shadow:0 4px 12px rgba(0,0,0,0.2);
+}
+
+#speedControl label{
+    display:inline-flex;
+    align-items:center;
+    min-height:32px;
+    cursor:pointer;
 }
 
 #question{
@@ -245,6 +293,20 @@ select{
 
     #hud div{
         margin:4px 2px;
+    }
+
+    #speedControl fieldset{
+        left:auto;
+        right:0;
+    }
+
+    #gameControls{
+        gap:4px;
+    }
+
+    #gameControls button,
+    #speedControl summary{
+        padding-inline:5px;
     }
 
     #question{
